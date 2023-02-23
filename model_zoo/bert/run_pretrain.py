@@ -22,6 +22,9 @@ from concurrent.futures import ThreadPoolExecutor
 import h5py
 import numpy as np
 import paddle
+
+# FIXME: For Time-only profile
+import paddle.profiler as pro
 from paddle.io import DataLoader, Dataset
 
 from paddlenlp.data import Stack
@@ -37,8 +40,15 @@ from paddlenlp.transformers import (
     ErnieTokenizer,
     LinearDecayWithWarmup,
 )
-from paddlenlp.utils import profiler
+
+# FIXME: Default profiler
+# from paddlenlp.utils import profiler
 from paddlenlp.utils.tools import TimeCostAverage
+
+# FIXME: For nsys Timeline profile
+# import paddle.fluid.core as core
+# nsys profile --stats true -w true -t cuda,nvtx,osrt,cudnn,cublas -s cpu --capture-range=cudaProfilerApi -x true --force-overwrite true -o ${output_filename}
+# python train.py ...
 
 FORMAT = "%(asctime)s-%(levelname)s: %(message)s"
 logging.basicConfig(level=logging.INFO, format=FORMAT)
@@ -147,9 +157,11 @@ def parse_args():
 
 
 def set_seed(args):
-    random.seed(args.seed + paddle.distributed.get_rank())
+    # FIXME: fix seeds for reproducibility
+    # random.seed(args.seed + paddle.distributed.get_rank())
     np.random.seed(args.seed + paddle.distributed.get_rank())
     paddle.seed(args.seed + paddle.distributed.get_rank())
+    random.seed(args.seed + paddle.distributed.get_rank())
 
 
 class WorkerInitObj(object):
@@ -321,6 +333,14 @@ def do_train(args):
 
     pool = ThreadPoolExecutor(1)
     global_step = 0
+    # FIXME: For Time-only profile
+    p = pro.Profiler(timer_only=True)
+    # p = pro.Profiler(
+    #     targets=[pro.ProfilerTarget.CPU, pro.ProfilerTarget.GPU],
+    #     scheduler=[10, 20],
+    #     timer_only=False)
+    p.start()
+    print("Start profile...")
     for epoch in range(args.num_train_epochs):
         files = [
             os.path.join(args.input_dir, f)
@@ -424,9 +444,11 @@ def do_train(args):
                 train_run_cost = time.time() - batch_start
                 train_cost_avg.record(train_run_cost)
 
-                # Profile for model benchmark
-                if args.profiler_options is not None:
-                    profiler.add_profiler_step(args.profiler_options)
+                # FIXME: Model default profiler Profile for model benchmark
+                # if args.profiler_options is not None:
+                #     profiler.add_profiler_step(args.profiler_options)
+                # FIXME: For Time-only profile
+                p.step(num_samples=96)
 
                 if global_step % args.logging_steps == 0:
                     if paddle.distributed.get_rank() == 0:
@@ -459,6 +481,9 @@ def do_train(args):
                         paddle.save(optimizer.state_dict(), os.path.join(output_dir, "model_state.pdopt"))
                 if global_step >= args.max_steps:
                     del train_data_loader
+                    p.stop()
+                    p.summary()
+                    print("Stop profile...")
                     return
                 batch_start = time.time()
 

@@ -21,6 +21,9 @@ from pprint import pprint
 import numpy as np
 import paddle
 import paddle.distributed as dist
+
+# FIXME: For Time-only profile
+import paddle.profiler as pro
 from benchmark import options
 from benchmark.modules.benchmark_utils import clone_inputs
 from benchmark.options import LR_SCHEDULER_REGISTRY, MODEL_REGISTRY, OPTIMIZER_REGISTRY
@@ -29,11 +32,17 @@ from benchmark.utils.record import AverageStatistical
 from paddlenlp.utils import profiler
 from paddlenlp.utils.log import logger
 
+# FIXME: For nsys Timeline profile
+# import paddle.fluid.core as core
+# nsys profile --stats true -w true -t cuda,nvtx,osrt,cudnn,cublas -s cpu --capture-range=cudaProfilerApi -x true --force-overwrite true -o ${output_filename}
+# python train.py ...
 
-def set_seed(seed):
-    paddle.seed(seed)
-    random.seed(seed)
+
+def set_seed(seed=1024):
     np.random.seed(seed)
+    paddle.seed(seed)
+    # FIXME: fix seeds for reproducibility
+    random.seed(seed)
 
 
 def do_generated_inputs(args):
@@ -236,7 +245,13 @@ def do_train(args):
     reader_cost_avg = AverageStatistical()
     batch_cost_avg = AverageStatistical()
     batch_ips_avg = AverageStatistical()
-
+    # FIXME: For Time-only profile
+    p = pro.Profiler(timer_only=True)
+    # p = pro.Profiler(
+    #     targets=[pro.ProfilerTarget.CPU, pro.ProfilerTarget.GPU],
+    #     scheduler=[10, 20],
+    #     timer_only=False)
+    p.start()
     # Train loop
     for pass_id in range(args.epoch):
         epoch_start = time.time()
@@ -267,9 +282,28 @@ def do_train(args):
 
                 optimizer.step()
                 optimizer.clear_grad()
+            # FIXME: Model default profiler
+            # if args.profiler_options is not None:
+            #     profiler.add_profiler_step(args.profiler_options)
 
-            if args.profiler_options is not None:
-                profiler.add_profiler_step(args.profiler_options)
+            # FIXME: For nsys Timeline profile
+            # if i == 10:
+            #     core.nvprof_start()
+            #     core.nvprof_enable_record_event()
+            #     core.nvprof_nvtx_push(str(i))
+            # if i == 20:
+            #     core.nvprof_nvtx_pop()
+            #     core.nvprof_stop()
+            #     sys.exit()
+            # if i > 100 and i < 110:
+            #     core.nvprof_nvtx_pop()
+            #     core.nvprof_nvtx_push(str(i))
+
+            # FIXME: For OP-details profile
+            # if i == 0:
+            #     paddle.fluid.profiler.start_profiler("GPU", "Default")
+            # if i == 100:
+            #     paddle.fluid.profiler.stop_profiler("total", "video.profile")
 
             if args.max_steps and step_id == args.max_steps:
                 if args.save_model and rank == 0:
@@ -316,6 +350,10 @@ def do_train(args):
 
             batch_id += 1
             step_id += 1
+            # FIXME: For Time-only profile
+            p.step(num_samples=4)
+        p.stop()
+        # p.summary()
 
         if args.lr_scheduler is not None and args.scheduler_update_by_epoch:
             lr.step()
